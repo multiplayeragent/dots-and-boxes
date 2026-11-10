@@ -1,0 +1,21 @@
+{
+  "name": "Dots and Boxes",
+  "genre": "board",
+  "dim": "2D",
+  "mode": "Turn-based",
+  "players": "2–4",
+  "hook": "Draw a line. Close a box. Go again.",
+  "how": "Take turns drawing a line between two dots. Close a box to claim it and draw again; when every line is in, most boxes wins. Up to 4 play at once, bots fill the empty seats, and anyone else watches and joins the next game.",
+  "controls": "Click or tap between two dots (on a phone, slide to the line and let go)",
+  "uses": [
+    ["Host-run rules", "The host's browser checks every line and keeps the turn timer; if it leaves, the next player takes over."],
+    ["Bots", "Bots fill the seats nobody is in, so you can play alone, and a friend who joins takes over a bot."],
+    ["Live sync", "Everyone sees the same lines and boxes, drawn in the moment they're played."],
+    ["Leaderboard", "Most wins, shown after every game."]
+  ],
+  "ideas": [
+    "Make the grid 7 by 7",
+    "Add golden boxes worth 3 points",
+    "Make it a chalkboard with chalk sounds"
+  ]
+}

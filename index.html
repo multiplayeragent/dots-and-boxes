@@ -1,0 +1,599 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Dots and Boxes</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; background: #fbf6ea; }
+  body { font: 15px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #2b2d42; user-select: none; -webkit-user-select: none; }
+  canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; cursor: pointer; }
+  .hud { position: fixed; pointer-events: none; }
+  #seats { top: max(10px, env(safe-area-inset-top)); left: 0; right: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; padding: 0 10px; }
+  .chip { display: flex; align-items: center; gap: 7px; min-width: 0; max-width: calc(50vw - 16px); padding: 4px 12px 4px 4px; border-radius: 999px; background: #ffffffe6;
+          box-shadow: 0 1px 4px #2b2d4222; font-weight: 650; white-space: nowrap; transition: box-shadow .25s, transform .25s; }
+  .chip.turn { box-shadow: 0 0 0 3px var(--s), 0 4px 14px #2b2d4233; transform: translateY(1px); }
+  .chip .sw { width: 28px; height: 28px; border-radius: 9px; flex: none; display: grid; place-items: center; background: var(--s); color: #fff; font-size: 15px;
+              box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--p); }
+  .chip .nm { overflow: hidden; text-overflow: ellipsis; }
+  .chip .tag { font-size: 11px; font-weight: 600; opacity: .55; }
+  .chip b { font-size: 17px; color: var(--s); }
+  .chip i { font-style: normal; font-size: 12px; font-weight: 800; color: #e63946; }
+  #status { bottom: calc(max(8px, env(safe-area-inset-bottom)) + 40px); left: 0; right: 0; text-align: center; font-weight: 800; font-size: 19px; padding: 0 12px; }
+  #toast { top: 40%; left: 50%; transform: translateX(-50%); padding: 7px 16px; border-radius: 999px; background: #2b2d42e6; color: #fff; font-weight: 700;
+           font-size: 15px; transition: opacity .4s; white-space: nowrap; }
+  #watch { bottom: calc(max(8px, env(safe-area-inset-bottom)) + 20px); left: 0; right: 0; text-align: center; font-size: 12px; opacity: .6; }
+  #net { bottom: max(6px, env(safe-area-inset-bottom)); left: 0; right: 0; text-align: center; font-size: 12px; opacity: .6; }
+  #act { position: fixed; right: max(12px, env(safe-area-inset-right)); bottom: calc(max(10px, env(safe-area-inset-bottom)) + 70px); min-width: 120px; min-height: 46px;
+         border-radius: 14px; border: 0; background: #2b2d42; color: #fff; font: 800 15px system-ui, sans-serif; cursor: pointer; }
+  #over { position: fixed; inset: 0; display: grid; place-items: center; background: #2b2d4255; }
+  #over[hidden], #act[hidden] { display: none; }
+  .card { box-sizing: border-box; width: min(380px, calc(100vw - 32px)); max-height: 86vh; overflow: auto; padding: 20px; border-radius: 18px;
+          background: #fffdf7; border: 2px solid #2b2d42; box-shadow: 6px 6px 0 #2b2d42; text-align: center; }
+  .card h2 { margin: 0; font-size: 28px; } .card p { margin: 4px 0 10px; opacity: .8; }
+  .card h3 { margin: 10px 0 4px; font-size: 13px; color: #ef476f; text-align: left; }
+  .card ol { text-align: left; margin: 0 0 6px; padding-left: 24px; font-size: 14px; min-height: 24px; }
+  .card li span { float: right; font-weight: 700; }
+  .card button { width: 100%; min-height: 48px; border-radius: 12px; border: 0; font: 800 16px system-ui, sans-serif; cursor: pointer; margin-top: 8px; }
+  #again { background: #ef476f; color: #fff; } #look { background: #2b2d4214; color: #2b2d42; }
+  #next { font-size: 12px; opacity: .6; margin: 8px 0 0; }
+  .hide { display: none !important; }
+</style>
+<script src="https://cdn.multiplayeragent.com/sdk/mp.global.js"></script>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div class="hud" id="seats"></div>
+<div class="hud" id="status"></div>
+<div class="hud" id="toast" style="opacity:0"></div>
+<div class="hud" id="watch"></div>
+<div class="hud" id="net">Connecting…</div>
+<button id="act" hidden>Play again</button>
+<div id="over" hidden><div class="card">
+  <h2 id="overTitle"></h2><p id="overWhy"></p>
+  <h3>This game</h3><ol id="ranks"></ol>
+  <h3>Most wins</h3><ol id="board"><li>Loading…</li></ol>
+  <button id="again">Play again</button><button id="look">Look at the board</button>
+  <p id="next"></p>
+</div></div>
+<script>
+/* ═══ DOTS AND BOXES · a Multiplayer Agent starter ═════════════════════════════════════
+ * Take turns drawing a line between two dots. Close a box to claim it and go again. Most
+ * boxes wins. Turn-based, 2–4 players; bots fill the empty seats; anyone else watches.
+ *
+ * WHERE THINGS ARE (search for the "── " headers):
+ *   CONFIG ........ grid size, seats, the bots, timings, colors, the leaderboard
+ *   CONNECTION .... MP_CONNECT, joining, the offline room, who is host
+ *   RULES ......... lines, boxes, which line closes which box
+ *   BOT ........... take a box if it can, else a safe line, else give away the least
+ *   GAME (HOST) ... seats, checking and drawing lines, turns, bots, the turn timer, results,
+ *                   the next game. Only the host writes the shared `game` field.
+ *   EFFECTS ....... lines drawing themselves, boxes popping, sparks, sounds
+ *   DRAW .......... layout, the paper, boxes, lines, the line you're aiming at, dots
+ *   MY MOVES ...... picking the line nearest your finger, sending it
+ *   HUD & RESULTS . player chips, status, results card, leaderboard
+ *   INPUT / LOOP .. pointer and touch, the main loop
+ *
+ * HOW THE MULTIPLAYER WORKS (a relay room: no server code, the HOST's browser runs the rules):
+ *   - The whole game lives in ONE shared field, `game`: {id, v, lines, boxes, seats, first,
+ *     turn, ply, last, again, wins, at, res, win, endsAt}. `lines` has one character per
+ *     line and `boxes` one per box: "." for none yet, else the letter of the seat that drew
+ *     or closed it ("a" = seat 1 … "d" = seat 4). `seats` = sessionIds or "bot".
+ *     Only the HOST writes it, and `v` goes up on every write.
+ *   - The HOST is the lowest sessionId among live players (heartbeat seen in the last 3s),
+ *     worked out every frame. It checks every line, plays the bots, draws a line for a
+ *     player whose 20s run out, hands seats to waiting players and starts the next game.
+ *     A new host carries on from `game` (the turn timer is the timestamp `at`).
+ *   - Each player writes its OWN entity: `n` (name), `c` (color), `hb` (heartbeat).
+ *   - Players send intents to the host: "line" {g, ply, l} and "again" {g}. The host never
+ *     gets its own sends, so it applies its own lines directly.
+ *   - Bots fill the game up to 3 seats; up to 4 people play. Someone who arrives mid-game
+ *     takes a bot's seat, or plays from the next game. A seat whose player is gone for 10s
+ *     goes to a bot.
+ *   - ?attract plays offline, four bots, starting mid-game (the preview video is recorded from it).
+ *   - Leaderboard "wins": +1 for each game a player wins (a shared top score counts), shown
+ *     on the results card.
+ */
+
+// ── CONFIG ──────────────────────────────────────────────────────────────────────────
+const CONFIG = {
+  cols: 5, rows: 5,       // boxes across and down (one more dot each way)
+  seats: 3,               // bots fill the game up to this many players ...
+  maxSeats: 4,            // ... and up to this many people play at once (more watch)
+  botThinkMs: 900,        // a bot waits this long before drawing a line ...
+  botAgainMs: 450,        // ... and this long when it goes again after closing a box
+  botSlip: 0.06,          // chance a bot draws a careless line while safe ones are left
+  turnMs: 20000,          // a player who takes longer than this gets a line drawn for them
+  seatGraceMs: 10000,     // a seated player silent this long loses the seat to a bot
+  resultsMs: 20000,       // results show this long, then the next game starts (Play again starts it at once)
+  hintMs: 14000,          // the "tap between two dots" hint shows this long
+  lineMs: 180,            // how long a line takes to draw itself
+  paper: "#fbf6ea", rule: "#dbe7f1", margin: "#f2bcbc", ink: "#2b2d42",
+  seatColors: ["#ef476f", "#118ab2", "#06a77d", "#f08c2e"],
+  botColor: "#8892b0",    // the bots' ring color (not in COLORS, so no player ever matches it)
+  board: "wins",          // leaderboard name
+  attractOpening: 30,     // ?attract starts each game with this many safe lines already drawn
+};
+const BOT_NAMES = ["Doodle", "Scribble", "Inky", "Pencil"];
+const GLYPHS = ["●", "▲", "■", "◆"]; // each seat's mark, drawn in its boxes
+const COLORS = ["#ff6b6b", "#4dabf7", "#69db7c", "#b197fc", "#ff922b", "#f783ac", "#3bc9db", "#ffd43b"];
+const NAME_A = ["Swift", "Clever", "Bold", "Quiet", "Lucky", "Sly"], NAME_B = ["Dot", "Box", "Line", "Square", "Doodle"];
+
+// ── CONNECTION ──────────────────────────────────────────────────────────────────────
+// The builder fills these in for this game. Downloaded from GitHub? Put your own pk_ key here.
+const MP_CONNECT = {
+  key: 'pk_REPLACE_ME',
+  room: 'dots-and-boxes',
+  endpoint: 'wss://live.multiplayeragent.com',
+  apiUrl: 'https://api.multiplayeragent.com',
+};
+const ATTRACT = new URLSearchParams(location.search).has("attract");
+
+/** Same shape as the SDK client, kept in this tab: offline play and ?attract. */
+function localRoom() {
+  const id = "local", state = { entities: { players: { [id]: {} } }, shared: {} }, subs = [];
+  let queued = false;
+  const emit = () => { if (!queued) { queued = true; queueMicrotask(() => { queued = false; subs.forEach((f) => f(state)); }); } };
+  const put = (o, k, v) => { if (typeof k === "object") Object.assign(o, k); else o[k] = v; emit(); };
+  return {
+    sessionId: id, state, offline: true,
+    me: { set: (k, v) => put(state.entities.players[id], k, v) },
+    setShared: (k, v) => put(state.shared, k, v),
+    onState: (f) => { subs.push(f); f(state); }, onJoin() {}, onLeave() {}, on() {}, send() {},
+    onDisconnect() {}, onReconnect() {}, leave: async () => {},
+  };
+}
+async function connect() {
+  if (ATTRACT || typeof MP === "undefined") return localRoom();
+  try {
+    const mp = await Promise.race([MP.join({ ...MP_CONNECT }), new Promise((_, no) => setTimeout(() => no(new Error("timed out")), 10000))]);
+    window.mp = mp; // the builder calls window.mp.leave() when the page closes
+    return mp;
+  } catch (e) {
+    console.warn("Playing offline:", e && e.message);
+    return localRoom();
+  }
+}
+const parse = (v, fb) => { if (typeof v !== "string") return fb; try { return JSON.parse(v); } catch { return fb; } };
+let net = null, S = { entities: { players: {} }, shared: {} };
+const seenHb = new Map(); // sessionId -> { hb, at } on OUR clock
+/** Players whose heartbeat moved in the last 3s (plus us), sorted by sessionId. */
+function livePlayers() {
+  const now = performance.now(), out = [];
+  for (const [id, p] of Object.entries(S.entities.players || {})) {
+    const s = seenHb.get(id);
+    if (!s || s.hb !== p.hb) seenHb.set(id, { hb: p.hb, at: now });
+    if (id === net.sessionId || now - seenHb.get(id).at < 3000) out.push(id);
+  }
+  return out.sort();
+}
+const isHost = () => livePlayers()[0] === net.sessionId;
+/** Still in the room and heard from within the seat grace time (a backgrounded phone keeps its seat). */
+const stillHere = (id) => id === net.sessionId || (!!S.entities.players[id] && performance.now() - (seenHb.get(id)?.at ?? -1e9) < CONFIG.seatGraceMs);
+const pickOne = (list) => list[Math.floor(Math.random() * list.length)];
+
+// ── RULES ───────────────────────────────────────────────────────────────────────────
+// Lines are numbered: first every horizontal line (row by row, rows 0..rows), then every
+// vertical line (row by row, columns 0..cols). Box (r, c) has its top-left corner at dot (c, r).
+const BW = CONFIG.cols, BH = CONFIG.rows, HLINES = (BH + 1) * BW, LINES = HLINES + BH * (BW + 1), BOXES = BW * BH, SEATS = "abcd";
+const hLine = (r, c) => r * BW + c;                  // along the top of box (r, c)
+const vLine = (r, c) => HLINES + r * (BW + 1) + c;   // down the left of box (r, c)
+const sidesOfBox = (b) => { const r = Math.floor(b / BW), c = b % BW; return [hLine(r, c), hLine(r + 1, c), vLine(r, c), vLine(r, c + 1)]; };
+/** The dots a line joins: [x1, y1, x2, y2] in dot units. */
+function lineEnds(l) {
+  if (l < HLINES) { const r = Math.floor(l / BW), c = l % BW; return [c, r, c + 1, r]; }
+  const k = l - HLINES, r = Math.floor(k / (BW + 1)), c = k % (BW + 1);
+  return [c, r, c, r + 1];
+}
+/** The one or two boxes a line is a side of. */
+function boxesOfLine(l) {
+  const [x1, y1, x2] = lineEnds(l), out = [];
+  if (x1 !== x2) { if (y1 > 0) out.push((y1 - 1) * BW + x1); if (y1 < BH) out.push(y1 * BW + x1); }
+  else { if (x1 > 0) out.push(y1 * BW + x1 - 1); if (x1 < BW) out.push(y1 * BW + x1); }
+  return out;
+}
+const sidesDrawn = (lines, b) => sidesOfBox(b).filter((l) => lines[l] !== ".").length;
+/** Draw line l for the seat with this letter. Returns { lines, boxes, made: boxes it closed } or null. */
+function takeLine(lines, boxes, l, letter) {
+  if (typeof l !== "number" || !(l >= 0 && l < LINES) || lines[l] !== ".") return null;
+  const nl = lines.slice(0, l) + letter + lines.slice(l + 1), made = [];
+  let nb = boxes;
+  for (const b of boxesOfLine(l)) if (nb[b] === "." && sidesDrawn(nl, b) === 4) { nb = nb.slice(0, b) + letter + nb.slice(b + 1); made.push(b); }
+  return { lines: nl, boxes: nb, made };
+}
+const boxCount = (boxes, s) => [...boxes].filter((ch) => ch === SEATS[s]).length;
+const freeLines = (lines) => [...Array(LINES).keys()].filter((l) => lines[l] === ".");
+
+// ── BOT ─────────────────────────────────────────────────────────────────────────────
+const closesBox = (lines, l) => boxesOfLine(l).some((b) => sidesDrawn(lines, b) === 3);
+const givesBox = (lines, l) => boxesOfLine(l).some((b) => sidesDrawn(lines, b) === 2);
+/** How many boxes the next player could grab in a row after line l. */
+function giveaway(lines, l) {
+  let r = { lines: lines.slice(0, l) + "x" + lines.slice(l + 1), boxes: ".".repeat(BOXES) }, n = 0;
+  for (let guard = 0; guard < LINES; guard++) {
+    const f = freeLines(r.lines).find((x) => closesBox(r.lines, x));
+    if (f === undefined) break;
+    r = takeLine(r.lines, r.boxes, f, "x"); n += r.made.length;
+  }
+  return n;
+}
+/** The line a bot draws: close a box if it can, else a line that gives nothing away, else the cheapest. */
+function botLine(lines) {
+  const free = freeLines(lines), take = free.filter((l) => closesBox(lines, l));
+  if (take.length) return pickOne(take);
+  const safe = free.filter((l) => !givesBox(lines, l));
+  if (safe.length) return Math.random() < CONFIG.botSlip ? pickOne(free) : pickOne(safe);
+  let best = [], least = Infinity;
+  for (const l of free) { const n = giveaway(lines, l); if (n < least) { least = n; best = [l]; } else if (n === least) best.push(l); }
+  return pickOne(best);
+}
+
+// ── GAME (HOST) ─────────────────────────────────────────────────────────────────────
+const host = { last: null };
+const gameMemo = { raw: undefined, g: null };
+/** The game as state has it, or the host's own newer write that hasn't come back yet. */
+function game() {
+  if (gameMemo.raw !== S.shared.game) { gameMemo.raw = S.shared.game; gameMemo.g = parse(S.shared.game, null); }
+  const g = gameMemo.g;
+  return host.last && isHost() && (!g || host.last.v > g.v) ? host.last : g;
+}
+function writeGame(g) { g = { ...g, v: (game()?.v ?? 0) + 1 }; host.last = g; net.setShared("game", JSON.stringify(g)); return g; }
+function freshGame(id, seats, first, wins) {
+  const g = { id, lines: ".".repeat(LINES), boxes: ".".repeat(BOXES), seats, first, turn: first, ply: 0, last: -1, again: false, wins: wins || {}, at: Date.now(), res: "", win: [], endsAt: 0 };
+  if (ATTRACT) attractOpening(g);
+  return g;
+}
+/** ?attract only: safe lines already drawn, so the preview starts where the boxes start falling. */
+function attractOpening(g) {
+  for (let i = 0; i < CONFIG.attractOpening; i++) {
+    const safe = freeLines(g.lines).filter((l) => !givesBox(g.lines, l) && !closesBox(g.lines, l));
+    if (!safe.length) break;
+    g.lines = takeLine(g.lines, g.boxes, pickOne(safe), SEATS[i % g.seats.length]).lines;
+  }
+}
+/** A bot counts its wins per seat; people by sessionId. */
+const winKey = (g, s) => (g.seats[s] === "bot" ? "bot" + s : g.seats[s]);
+
+/** Gone players lose their seat to a bot; waiting players take a bot's seat. */
+function fixSeats(g) {
+  if (ATTRACT) return g;
+  const seats = [...g.seats], waiting = livePlayers().filter((id) => !seats.includes(id));
+  for (let s = 0; s < seats.length; s++) if (seats[s] !== "bot" && !stillHere(seats[s])) seats[s] = "bot";
+  for (let s = 0; s < seats.length; s++) if (seats[s] === "bot" && waiting.length) seats[s] = waiting.shift();
+  return seats.every((id, s) => id === g.seats[s]) ? g : writeGame({ ...g, seats });
+}
+/** Draw a line for the seat whose turn it is (checked), closing boxes; the game ends when every line is in. */
+function applyLine(g, l) {
+  const r = takeLine(g.lines, g.boxes, l, SEATS[g.turn]);
+  if (!r) return false; // taken already, or nonsense: refused
+  const out = { ...g, lines: r.lines, boxes: r.boxes, ply: g.ply + 1, last: l, again: r.made.length > 0, at: Date.now(),
+    turn: r.made.length ? g.turn : (g.turn + 1) % g.seats.length }; // closed a box: go again
+  if (!r.lines.includes(".")) {
+    const counts = g.seats.map((_, s) => boxCount(r.boxes, s)), top = Math.max(...counts);
+    out.res = "done"; out.endsAt = Date.now() + CONFIG.resultsMs;
+    out.win = counts.map((n, s) => (n === top ? s : -1)).filter((s) => s >= 0);
+    out.wins = { ...g.wins };
+    for (const s of out.win) out.wins[winKey(g, s)] = (out.wins[winKey(g, s)] || 0) + 1;
+  }
+  writeGame(out);
+  return true;
+}
+/** A "line" intent (or the host's own): only from the seat whose turn it is, on this exact ply. */
+function hostLine(from, m) {
+  const g = game();
+  if (!g || g.res || m.g !== g.id || m.ply !== g.ply || g.seats[g.turn] !== from) return;
+  applyLine(g, m.l);
+}
+/** The next game: everyone still here keeps their seat, waiting players join (up to maxSeats), bots fill the rest. */
+function nextGame(g) {
+  let seats = [...g.seats];
+  if (!ATTRACT) {
+    seats = seats.map((id) => (id !== "bot" && stillHere(id) ? id : "bot"));
+    const waiting = livePlayers().filter((id) => !seats.includes(id));
+    seats = seats.map((id) => (id === "bot" && waiting.length ? waiting.shift() : id));
+    while (seats.length < CONFIG.maxSeats && waiting.length) seats.push(waiting.shift());
+    const n = Math.min(CONFIG.maxSeats, Math.max(CONFIG.seats, seats.filter((id) => id !== "bot").length));
+    while (seats.length > n && seats.includes("bot")) seats.splice(seats.lastIndexOf("bot"), 1);
+    while (seats.length < n) seats.push("bot");
+  }
+  const keep = new Set([...seats, ...livePlayers(), ...SEATS.split("").map((_, s) => "bot" + s)]), wins = {};
+  for (const [id, n] of Object.entries(g.wins || {})) if (keep.has(id)) wins[id] = n;
+  return writeGame(freshGame(g.id + 1, seats, (g.first + 1) % seats.length, wins));
+}
+function hostAgain(from, m) {
+  const g = game();
+  if (g && g.res && m.g === g.id && g.seats.includes(from)) nextGame(g);
+}
+function hostTick() {
+  let g = game();
+  if (!g) g = writeGame(freshGame(1, ATTRACT ? ["bot", "bot", "bot", "bot"] : [net.sessionId, ...Array(CONFIG.seats - 1).fill("bot")], 0));
+  g = fixSeats(g);
+  if (g.res) { if (Date.now() > g.endsAt) nextGame(g); return; }
+  const bot = g.seats[g.turn] === "bot", wait = bot ? (g.again ? CONFIG.botAgainMs : CONFIG.botThinkMs) : CONFIG.turnMs;
+  if (Date.now() > g.at + wait) applyLine(g, botLine(g.lines)); // a bot's turn, or a player who ran out of time
+}
+
+// ── EFFECTS ─────────────────────────────────────────────────────────────────────────
+// What the board shows, and when each line / box appeared (for drawing them in).
+const view = { id: -1, lines: "", boxes: "", lineAt: new Map(), boxAt: new Map(), popped: new Set() };
+const parts = [], floaters = [];
+function syncBoard(g, now) {
+  const sh = shown(g);
+  if (view.id !== g.id) {
+    view.lineAt.clear(); view.boxAt.clear(); view.popped.clear();
+    if (view.id >= 0 || ATTRACT) { // a new game: its opening lines (if any) draw themselves in
+      let k = 0;
+      for (let l = 0; l < LINES; l++) if (sh.lines[l] !== ".") view.lineAt.set(l, now + 200 + k++ * 22);
+      const me = mySeat(g);
+      if (view.id >= 0 && me >= 0) toast(g.turn === me ? "New game · you start" : `New game · you are ${GLYPHS[me]}`);
+    }
+    view.id = g.id; view.lines = sh.lines; view.boxes = sh.boxes; closedFor = -1; pending = null;
+    return;
+  }
+  if (sh.lines !== view.lines) for (let l = 0; l < LINES; l++) if (sh.lines[l] !== view.lines[l] && sh.lines[l] !== ".") { view.lineAt.set(l, now); sound("line"); }
+  if (sh.boxes !== view.boxes) for (let b = 0; b < BOXES; b++) if (sh.boxes[b] !== view.boxes[b] && sh.boxes[b] !== ".") view.boxAt.set(b, now + CONFIG.lineMs);
+  view.lines = sh.lines; view.boxes = sh.boxes;
+}
+function stepFx(dt, now) {
+  for (const [b, t] of view.boxAt) {
+    if (now < t || view.popped.has(b)) continue;
+    view.popped.add(b);
+    const s = SEATS.indexOf(view.boxes[b]), [x, y] = boxXY(b);
+    if (s < 0) continue;
+    burst(x, y, CONFIG.seatColors[s], 16);
+    floaters.push({ x, y, text: "+1", color: CONFIG.seatColors[s], life: 1 });
+    sound("box");
+  }
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const q = parts[i];
+    q.life -= dt; q.vy += q.g * dt; q.x += q.vx * dt; q.y += q.vy * dt; q.spin += dt * 8;
+    if (q.life <= 0) parts.splice(i, 1);
+  }
+  for (let i = floaters.length - 1; i >= 0; i--) { const f = floaters[i]; f.life -= dt * 1.2; f.y -= dt * 40; if (f.life <= 0) floaters.splice(i, 1); }
+}
+function burst(x, y, color, n, speed = 1) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, v = (60 + Math.random() * 200) * speed;
+    parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 60, g: 380, life: 0.5 + Math.random() * 0.5, size: 3 + Math.random() * 4, color, spin: Math.random() * 6 });
+  }
+}
+let actx = null; // sounds start after the first tap (browsers require it)
+function unlockAudio() { if (!actx) try { actx = new AudioContext(); } catch {} }
+function sound(kind) {
+  if (!actx || ATTRACT) return;
+  const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
+  const [type, f0, f1, len, vol] = { line: ["triangle", 520, 380, 0.07, 0.12], box: ["sine", 660, 990, 0.25, 0.2], win: ["sine", 520, 1040, 0.5, 0.22] }[kind];
+  o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + len * 0.8);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
+  o.connect(g).connect(actx.destination); o.start(t); o.stop(t + len + 0.05);
+}
+
+// ── DRAW ────────────────────────────────────────────────────────────────────────────
+const cv = document.getElementById("game"), ctx = cv.getContext("2d");
+let W = 0, H = 0, DPR = 1;
+const L = { cs: 60, ox: 0, oy: 0, top: 64 }; // box size, top-left dot, room the player chips take
+function fit() {
+  DPR = Math.min(2, devicePixelRatio || 1); W = innerWidth; H = innerHeight; cv.width = W * DPR; cv.height = H * DPR;
+  const top = ATTRACT ? 30 : L.top, bottom = ATTRACT ? 30 : 104; // room kept for the HUD
+  L.cs = Math.max(28, Math.min((W - 48) / BW, (H - top - bottom) / BH, 120));
+  L.ox = (W - L.cs * BW) / 2; L.oy = top + (H - top - bottom - L.cs * BH) / 2;
+}
+addEventListener("resize", fit); addEventListener("orientationchange", fit); fit();
+const dotXY = (x, y) => [L.ox + x * L.cs, L.oy + y * L.cs];
+const boxXY = (b) => dotXY((b % BW) + 0.5, Math.floor(b / BW) + 0.5);
+/** A seat's mark: circle, triangle, square, diamond. */
+function drawMark(s, x, y, r, color) {
+  ctx.fillStyle = color; ctx.beginPath();
+  if (s === 0) ctx.arc(x, y, r, 0, Math.PI * 2);
+  else if (s === 1) { ctx.moveTo(x, y - r * 1.1); ctx.lineTo(x + r * 1.05, y + r * 0.75); ctx.lineTo(x - r * 1.05, y + r * 0.75); ctx.closePath(); }
+  else if (s === 2) ctx.roundRect(x - r * 0.88, y - r * 0.88, r * 1.76, r * 1.76, r * 0.2);
+  else { ctx.moveTo(x, y - r * 1.15); ctx.lineTo(x + r * 1.0, y); ctx.lineTo(x, y + r * 1.15); ctx.lineTo(x - r * 1.0, y); ctx.closePath(); }
+  ctx.fill();
+}
+function strokeLine(l, color, width, k = 1) {
+  const [x1, y1, x2, y2] = lineEnds(l), [ax, ay] = dotXY(x1, y1), [bx, by] = dotXY(x2, y2);
+  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ax + (bx - ax) * k, ay + (by - ay) * k); ctx.stroke();
+}
+function draw(g, now) {
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.fillStyle = CONFIG.paper; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = CONFIG.rule; ctx.lineWidth = 1; ctx.beginPath();
+  for (let y = 28; y < H; y += 30) { ctx.moveTo(0, y + 0.5); ctx.lineTo(W, y + 0.5); }
+  ctx.stroke();
+  if (W > 560) { ctx.strokeStyle = CONFIG.margin; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(56, 0); ctx.lineTo(56, H); ctx.stroke(); }
+  const cs = L.cs, sh = g ? shown(g) : null;
+  if (sh) {
+    // claimed boxes: a tinted square with the seat's mark, popping in
+    for (let b = 0; b < BOXES; b++) {
+      const s = SEATS.indexOf(sh.boxes[b]);
+      if (s < 0) continue;
+      const t = view.boxAt.get(b), k = t === undefined ? 1 : Math.max(0, Math.min(1, (now - t) / 320));
+      if (k <= 0) continue;
+      const pop = k < 1 ? 1 + Math.sin(k * Math.PI) * 0.18 - (1 - k) * 0.5 : 1, [x, y] = boxXY(b), half = cs * 0.42 * pop;
+      ctx.fillStyle = CONFIG.seatColors[s] + "33"; ctx.beginPath(); ctx.roundRect(x - half, y - half, half * 2, half * 2, cs * 0.08); ctx.fill();
+      drawMark(s, x, y, cs * 0.17 * pop, CONFIG.seatColors[s]);
+    }
+    // drawn lines, each sweeping in; the newest one glows for a moment
+    const newest = pending ? pending.l : g.last;
+    for (let l = 0; l < LINES; l++) {
+      const s = SEATS.indexOf(sh.lines[l]);
+      if (s < 0) continue;
+      const t = view.lineAt.get(l), k = t === undefined ? 1 : Math.max(0, Math.min(1, (now - t) / CONFIG.lineMs));
+      if (k <= 0) continue;
+      const e = 1 - (1 - k) ** 3;
+      if (l === newest && t !== undefined && now - t < 1200) { ctx.globalAlpha = 0.3 * (1 - (now - t) / 1200); strokeLine(l, CONFIG.seatColors[s], cs * 0.17, e); ctx.globalAlpha = 1; }
+      strokeLine(l, CONFIG.seatColors[s], Math.max(4, cs * 0.085), e);
+    }
+    // the line I'm aiming at
+    const me = mySeat(g);
+    if (myTurn(g) && aim.line >= 0 && sh.lines[aim.line] === ".") {
+      ctx.setLineDash([cs * 0.08, cs * 0.12]); strokeLine(aim.line, CONFIG.seatColors[me] + "b0", Math.max(4, cs * 0.075)); ctx.setLineDash([]);
+    }
+  }
+  // the dots
+  ctx.fillStyle = CONFIG.ink;
+  for (let y = 0; y <= BH; y++) for (let x = 0; x <= BW; x++) { const [px, py] = dotXY(x, y); ctx.beginPath(); ctx.arc(px, py, Math.max(4, cs * 0.075), 0, Math.PI * 2); ctx.fill(); }
+  for (const q of parts) {
+    ctx.globalAlpha = Math.min(1, q.life * 2); ctx.fillStyle = q.color;
+    ctx.save(); ctx.translate(q.x, q.y); ctx.rotate(q.spin); ctx.fillRect(-q.size / 2, -q.size / 2, q.size, q.size); ctx.restore();
+  }
+  ctx.font = `800 ${Math.max(16, cs * 0.3)}px system-ui, sans-serif`; ctx.textAlign = "center";
+  for (const f of floaters) { ctx.globalAlpha = Math.min(1, f.life * 2); ctx.fillStyle = f.color; ctx.fillText(f.text, f.x, f.y - cs * 0.3); }
+  ctx.globalAlpha = 1;
+}
+
+// ── MY MOVES ────────────────────────────────────────────────────────────────────────
+const aim = { line: -1, down: false };
+let pending = null, hintUntil = performance.now() + CONFIG.hintMs;
+const mySeat = (g) => g.seats.indexOf(net.sessionId);
+const myTurn = (g) => !g.res && !pending && g.turn === mySeat(g);
+/** What the board shows: the game in state, or my line while it is on its way to the host. */
+function shown(g) {
+  if (pending && (pending.lines !== g.lines || performance.now() - pending.at > 4000)) pending = null;
+  return pending ? pending.next : g;
+}
+/** The free line nearest a screen point (within a bit under half a box), or -1. */
+function lineAt(x, y, lines) {
+  const gx = (x - L.ox) / L.cs, gy = (y - L.oy) / L.cs;
+  let best = -1, bd = 0.45;
+  for (let l = 0; l < LINES; l++) {
+    if (lines[l] !== ".") continue;
+    const [x1, y1, x2] = lineEnds(l);
+    const d = x1 === x2 ? Math.hypot(gx - x1, Math.max(0, Math.abs(gy - y1 - 0.5) - 0.35)) : Math.hypot(gy - y1, Math.max(0, Math.abs(gx - x1 - 0.5) - 0.35));
+    if (d < bd) { bd = d; best = l; }
+  }
+  return best;
+}
+function tryLine(l) {
+  const g = game();
+  if (!g || !myTurn(g) || l < 0 || g.lines[l] !== ".") return;
+  const msg = { g: g.id, ply: g.ply, l };
+  hintUntil = 0;
+  if (isHost()) return hostLine(net.sessionId, msg);
+  net.send("line", msg);
+  pending = { lines: g.lines, next: takeLine(g.lines, g.boxes, l, SEATS[g.turn]), l, at: performance.now() }; // shown until the host answers
+}
+
+// ── HUD & RESULTS ───────────────────────────────────────────────────────────────────
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const nameIn = (g, s) => { const id = g.seats[s]; return id === "bot" ? BOT_NAMES[s] : id === net.sessionId ? myName : String(S.entities.players[id]?.n || "Player"); };
+const colorOf = (id) => (id === "bot" ? CONFIG.botColor : id === net.sessionId ? myColor : S.entities.players[id]?.c || "#ccc");
+let toastAt = 0, dropped = false, resultsFor = -1, closedFor = -1, cardAt = 0, board = null, seatsSeen = null;
+function toast(text) { $("toast").textContent = text; $("toast").style.opacity = 1; toastAt = performance.now(); }
+function chips(g, sh) {
+  const left = Math.max(0, Math.ceil((g.at + CONFIG.turnMs - Date.now()) / 1000));
+  const html = g.seats.map((id, s) => {
+    const turn = !g.res && g.turn === s, tag = id === "bot" ? "bot" : id === net.sessionId ? "you" : "";
+    const clock = turn && id !== "bot" && left <= 10 ? `<i>${left}s</i>` : "", stars = g.wins?.[winKey(g, s)] ? ` ★${g.wins[winKey(g, s)]}` : "";
+    return `<div class="chip${turn ? " turn" : ""}" style="--s:${CONFIG.seatColors[s]};--p:${esc(colorOf(id))}"><span class="sw">${GLYPHS[s]}</span>` +
+      `<span class="nm">${esc(nameIn(g, s))}</span><span class="tag">${tag}${stars}</span><b>${boxCount(sh.boxes, s)}</b>${clock}</div>`;
+  }).join("");
+  if ($("seats").dataset.html !== html) { $("seats").dataset.html = html; $("seats").innerHTML = html; }
+  const top = $("seats").getBoundingClientRect().bottom + 16; // the chips may wrap to two rows on a phone
+  if (Math.abs(top - L.top) > 2) { L.top = top; fit(); }
+}
+function hud(g) {
+  const now = performance.now(), me = mySeat(g), sh = shown(g), turnName = nameIn(g, g.turn);
+  if (now - toastAt > 2500) $("toast").style.opacity = 0;
+  if (g.res && resultsFor !== g.id && [...view.boxAt.keys()].every((b) => view.popped.has(b))) { resultsFor = g.id; cardAt = now + 1000; showResults(g, me); }
+  if (ATTRACT) { for (const id of ["seats", "status", "watch", "net"]) $(id).classList.add("hide"); return; }
+  chips(g, sh);
+  const prev = seatsSeen; // someone took over from a bot, or a bot took over
+  seatsSeen = { id: g.id, seats: [...g.seats] };
+  if (prev && prev.id === g.id) for (let s = 0; s < g.seats.length; s++) if (prev.seats[s] !== g.seats[s]) toast(g.seats[s] === net.sessionId ? `You took over ${GLYPHS[s]}` : `${nameIn(g, s)} took over ${GLYPHS[s]}`);
+  const left = Math.max(0, Math.ceil((g.at + CONFIG.turnMs - Date.now()) / 1000));
+  const top = g.res ? Math.max(...g.seats.map((_, s) => boxCount(g.boxes, s))) : 0;
+  $("status").textContent = g.res ? (g.win.length > 1 ? `Tie at ${top} boxes!` : `${g.win[0] === me ? "You win" : nameIn(g, g.win[0]) + " wins"} with ${top} boxes!`)
+    : pending ? "Drawing…"
+    : me === g.turn ? (g.again && g.ply ? "Box! Go again" : "Your turn") + (now < hintUntil ? " · tap between two dots" : "") + (left <= 10 ? ` · ${left}s` : "")
+    : g.seats[g.turn] === "bot" ? `${turnName} is thinking…`
+    : me >= 0 ? `${turnName}'s turn` : `You're watching · ${turnName}'s turn`;
+  const watchers = livePlayers().filter((id) => !g.seats.includes(id));
+  $("watch").textContent = watchers.length ? "Watching (in next game): " + watchers.map((id) => (id === net.sessionId ? "you" : String(S.entities.players[id]?.n || "Player"))).join(", ") : "";
+  $("over").hidden = !g.res || resultsFor !== g.id || now < cardAt || closedFor === g.id;
+  $("act").hidden = !g.res || me < 0 || closedFor !== g.id;
+  if (g.res) $("next").textContent = `Next game in ${Math.max(0, Math.ceil((g.endsAt - Date.now()) / 1000))}s`;
+  const n = livePlayers().length;
+  $("net").textContent = net.offline ? "Offline: playing with bots" : dropped ? "Reconnecting…" : `Online · ${n} player${n === 1 ? "" : "s"}${isHost() ? " · you run the game" : ""}`;
+}
+function showResults(g, me) {
+  const won = g.win.includes(me), counts = g.seats.map((_, s) => boxCount(g.boxes, s));
+  for (const s of g.win) for (let i = 0; i < 3; i++) burst(W / 2 + (Math.random() - 0.5) * L.cs * BW, H / 2 + (Math.random() - 0.5) * L.cs * BH, CONFIG.seatColors[s], 22, 1.6);
+  if (won) sound("win");
+  $("overTitle").textContent = g.win.length > 1 ? (won ? "You tie for the win!" : "A tie!") : won ? "You win!" : me >= 0 ? "You lose" : `${nameIn(g, g.win[0])} wins`;
+  $("overWhy").textContent = g.win.length > 1 ? `${g.win.map((s) => nameIn(g, s)).join(" and ")} share it with ${counts[g.win[0]]} boxes.` : `${counts[g.win[0]]} of ${BOXES} boxes.`;
+  $("ranks").innerHTML = g.seats.map((_, s) => s).sort((a, b) => counts[b] - counts[a])
+    .map((s) => `<li style="color:${CONFIG.seatColors[s]}">${GLYPHS[s]} ${esc(nameIn(g, s))}${s === me ? " (you)" : ""}<span>${counts[s]}</span></li>`).join("");
+  $("again").classList.toggle("hide", me < 0);
+  const list = $("board");
+  if (!board) { list.innerHTML = "<li>Leaderboards need a connection.</li>"; return; }
+  list.innerHTML = "<li>Loading…</li>";
+  (won ? board.submit(1, "inc").catch(() => null) : Promise.resolve()).then(() => board.top(10)).then(({ entries }) => {
+    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>${e.score}</span></li>`).join("") : "<li>No wins yet. Be the first.</li>";
+  }).catch(() => { list.innerHTML = "<li>Couldn't load the leaderboard.</li>"; });
+}
+function playAgain() { const g = game(); if (!g || !g.res) return; const msg = { g: g.id }; if (isHost()) hostAgain(net.sessionId, msg); else net.send("again", msg); }
+$("again").onclick = playAgain;
+$("act").onclick = playAgain;
+$("look").onclick = () => { closedFor = game()?.id ?? -1; };
+
+// ── INPUT / LOOP ────────────────────────────────────────────────────────────────────
+// Mouse: hover shows the line, click draws it. Touch: press, slide to the line you want, let go.
+const linesNow = () => { const g = game(); return g ? shown(g).lines : ""; };
+cv.addEventListener("pointerdown", (e) => { e.preventDefault(); unlockAudio(); aim.down = true; aim.line = lineAt(e.clientX, e.clientY, linesNow()); });
+cv.addEventListener("pointermove", (e) => { if (e.pointerType === "mouse" || aim.down) aim.line = lineAt(e.clientX, e.clientY, linesNow()); });
+addEventListener("pointerup", (e) => {
+  if (!aim.down) return;
+  aim.down = false;
+  const l = lineAt(e.clientX, e.clientY, linesNow());
+  if (l >= 0) tryLine(l);
+  if (e.pointerType !== "mouse") aim.line = -1;
+});
+addEventListener("pointercancel", () => { aim.down = false; aim.line = -1; });
+cv.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse") aim.line = -1; });
+document.addEventListener("touchmove", (e) => e.preventDefault(), { passive: false });
+
+let myName = "", myColor = COLORS[0], last = performance.now(), lastHb = 0, lastHud = 0;
+try { myName = localStorage.getItem("mpa-name") || ""; } catch {}
+if (!myName) { myName = pickOne(NAME_A) + " " + pickOne(NAME_B); try { localStorage.setItem("mpa-name", myName); } catch {} }
+if (ATTRACT) { Object.assign(CONFIG, { botThinkMs: 360, botAgainMs: 190, resultsMs: 2600, lineMs: 140, botSlip: 0 }); $("net").textContent = ""; }
+/** Two people joined at once with one color: the one with the higher sessionId picks a free one. */
+function fixColor() {
+  const others = Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId);
+  if (!others.some(([id, p]) => p.c === myColor && id < net.sessionId) && myColor !== CONFIG.botColor) return;
+  const taken = new Set([...others.map(([, p]) => p.c), CONFIG.botColor]), free = COLORS.find((c) => !taken.has(c));
+  if (free) { myColor = free; net.me.set("c", free); }
+}
+
+function frame(now) {
+  const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); last = now; // the first frame can be stamped before `last`
+  if (now - lastHb > 1000) { lastHb = now; net.me.set("hb", Date.now()); fixColor(); }
+  if (isHost()) hostTick();
+  const g = game();
+  if (g) {
+    syncBoard(g, now);
+    if (now - lastHud > 100) { lastHud = now; hud(g); }
+  }
+  stepFx(dt, now);
+  draw(g, now);
+  requestAnimationFrame(frame);
+}
+
+(async function start() {
+  net = await connect();
+  net.onState((st) => { S = st; });
+  net.on("line", (m, from) => { if (isHost() && m) hostLine(from, m); });
+  net.on("again", (m, from) => { if (isHost() && m) hostAgain(from, m); });
+  net.onDisconnect(() => { dropped = true; $("net").textContent = "Reconnecting…"; });
+  net.onReconnect(() => { dropped = false; });
+  if (!net.offline && typeof MP !== "undefined") board = MP.auth({ key: MP_CONNECT.key, apiUrl: MP_CONNECT.apiUrl }).leaderboard(CONFIG.board);
+  const takenColors = new Set(Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId).map(([, p]) => p.c));
+  myColor = COLORS.find((c) => !takenColors.has(c)) || pickOne(COLORS);
+  net.me.set({ n: myName, c: myColor, hb: Date.now() });
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
