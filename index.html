@@ -6,7 +6,7 @@
 <title>Dots and Boxes</title>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; background: #fbf6ea; }
-  body { font: 15px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #2b2d42; user-select: none; -webkit-user-select: none; }
+  body { font: 15px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #2b2d42; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; } /* no blue flash over the board on each tap */
   canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; cursor: pointer; }
   .hud { position: fixed; pointer-events: none; }
   #seats { top: max(10px, env(safe-area-inset-top)); left: 0; right: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; padding: 0 10px; }
@@ -34,6 +34,7 @@
   .card h3 { margin: 10px 0 4px; font-size: 13px; color: #ef476f; text-align: left; }
   .card ol { text-align: left; margin: 0 0 6px; padding-left: 24px; font-size: 14px; min-height: 24px; }
   .card li span { float: right; font-weight: 700; }
+  .card li.note { list-style: none; margin-left: -24px; opacity: .8; } /* a status line, not a numbered entry */
   .card button { width: 100%; min-height: 48px; border-radius: 12px; border: 0; font: 800 16px system-ui, sans-serif; cursor: pointer; margin-top: 8px; }
   #again { background: #ef476f; color: #fff; } #look { background: #2b2d4214; color: #2b2d42; }
   #next { font-size: 12px; opacity: .6; margin: 8px 0 0; }
@@ -52,7 +53,7 @@
 <div id="over" hidden><div class="card">
   <h2 id="overTitle"></h2><p id="overWhy"></p>
   <h3>This game</h3><ol id="ranks"></ol>
-  <h3>Most wins</h3><ol id="board"><li>Loading…</li></ol>
+  <h3>Most wins</h3><ol id="board"><li class="note">Loading…</li></ol>
   <button id="again">Play again</button><button id="look">Look at the board</button>
   <p id="next"></p>
 </div></div>
@@ -529,11 +530,11 @@ function showResults(g, me) {
     .map((s) => `<li style="color:${CONFIG.seatColors[s]}">${GLYPHS[s]} ${esc(nameIn(g, s))}${s === me ? " (you)" : ""}<span>${counts[s]}</span></li>`).join("");
   $("again").classList.toggle("hide", me < 0);
   const list = $("board");
-  if (!board) { list.innerHTML = "<li>Leaderboards need a connection.</li>"; return; }
-  list.innerHTML = "<li>Loading…</li>";
+  if (!board) { list.innerHTML = "<li class=\"note\">Leaderboards need a connection.</li>"; return; }
+  list.innerHTML = "<li class=\"note\">Loading…</li>";
   (won ? board.submit(1, "inc").catch(() => null) : Promise.resolve()).then(() => board.top(10)).then(({ entries }) => {
-    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>${e.score}</span></li>`).join("") : "<li>No wins yet. Be the first.</li>";
-  }).catch(() => { list.innerHTML = "<li>Couldn't load the leaderboard.</li>"; });
+    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>${e.score}</span></li>`).join("") : "<li class=\"note\">No wins yet. Be the first.</li>";
+  }).catch(() => { list.innerHTML = "<li class=\"note\">Couldn't load the leaderboard.</li>"; });
 }
 function playAgain() { const g = game(); if (!g || !g.res) return; const msg = { g: g.id }; if (isHost()) hostAgain(net.sessionId, msg); else net.send("again", msg); }
 $("again").onclick = playAgain;
@@ -543,7 +544,8 @@ $("look").onclick = () => { closedFor = game()?.id ?? -1; };
 // ── INPUT / LOOP ────────────────────────────────────────────────────────────────────
 // Mouse: hover shows the line, click draws it. Touch: press, slide to the line you want, let go.
 const linesNow = () => { const g = game(); return g ? shown(g).lines : ""; };
-cv.addEventListener("pointerdown", (e) => { e.preventDefault(); unlockAudio(); aim.down = true; aim.line = lineAt(e.clientX, e.clientY, linesNow()); });
+cv.addEventListener("contextmenu", (e) => e.preventDefault()); // no browser menu on the board
+cv.addEventListener("pointerdown", (e) => { e.preventDefault(); unlockAudio(); if (e.button) return; aim.down = true; aim.line = lineAt(e.clientX, e.clientY, linesNow()); });
 cv.addEventListener("pointermove", (e) => { if (e.pointerType === "mouse" || aim.down) aim.line = lineAt(e.clientX, e.clientY, linesNow()); });
 addEventListener("pointerup", (e) => {
   if (!aim.down) return;
